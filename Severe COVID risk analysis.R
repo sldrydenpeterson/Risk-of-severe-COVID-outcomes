@@ -422,296 +422,295 @@ severecovid.risk.est.treat.all  <- rbind(cat3.unvax.tx, cat3.vax.gt8mo.tx, cat3.
          "Prescribed outpatient COVID treatment" = risk) 
 
 
-### sensitivity analyses
-
-## non-parametric estimation of weights
-nonpara.wts<- enclave.eligible %>%
-  group_by(MASS.cat, age.cat, mod.vax.status, race.eth.collapsed, highADI, 
-           covid_treat) %>%
-  summarize(a = sum(if_else(outpatient.coviddx == 1 & covid_admit_death == 1, 1, 0)),
-            b = sum(if_else(outpatient.coviddx == 1 & covid_admit_death == 0, 1, 0)),
-            c = sum(if_else(outpatient.coviddx == 0 & covid_admit_death == 1, 1, 0))) %>%
-  ungroup() %>%
-  mutate(NUE1 = ((b + 1)*(c + 1)/(a + 1))-1,  
-         NUE2 = a + b + c + ((b*c)/(a+1)), 
-         MLE1 = if_else(a != 0, a + b + c + (b*c)/a, 0),
-         MLE2 = if_else(a != 0, (a + b)*(a + c)/a, 0),
-         NUEd = (b*c)/(a+1),
-         MLEd = if_else(a != 0,(b*c)/(a), 0),
-         wt.nonpara = 1/((a + 1) / (a + c + 2))) %>% #summarise(NUE1 = sum(NUE1), NUE2 = sum(NUE2), MLE1 = sum(MLE1), MLE2 = sum(MLE2), NUEd = sum(NUEd), MLEd = sum(MLEd)) %>%
-  select(MASS.cat, age.cat, mod.vax.status, race.eth.collapsed, highADI, covid_treat, wt.nonpara)
-
-enclave.nonpara.wt <- left_join(
-  enclave.eligible, nonpara.wts, by = c("MASS.cat", "age.cat", "mod.vax.status", "race.eth.collapsed", "highADI", "covid_treat") ) %>% 
-  mutate(outpt.wts = if_else(outpatient.coviddx == 1 & covid_admit_death == 0, wt.nonpara, 1)) %>% # use weights for outpatient dx (Chapman NUE) to estimate denominator, no weights for numerator as all observed
-  mutate(mod.vax.status = case_when(
-    mod.vax.status == "Vaccinated, last booster more than 8 months ago" ~ "Vaccinated, last booster or COVID ≥ 8 months prior",  #edit labels for accuracy
-    mod.vax.status == "Vaccinated, last booster less than 8 months ago" ~ "Vaccinated, last booster or COVID < 8 months prior", 
-    mod.vax.status == "Not fully vaccinated" ~ "Not fully vaccinated")) %>%
-  mutate(mod.vax.status = fct_relevel(mod.vax.status, "Not fully vaccinated", "Vaccinated, last booster or COVID ≥ 8 months prior")) 
-
-est <- cbind(enclave.nonpara.wt %>%
-                filter(covid_treat == 0) %>%
-                group_by(MASS.cat, mod.vax.status) %>%
-                summarize(covid_admit_death = round(sum(covid_admit_death),0),
-                          cases = round(sum(wt.nonpara),0),
-                          untreat.risk = covid_admit_death/cases) %>%
-                    ungroup(), 
-                enclave.nonpara.wt %>%
-                filter(covid_treat == 1) %>%
-                  group_by(MASS.cat, mod.vax.status) %>%
-                  summarize(covid_admit_death = sum(covid_admit_death),
-                            cases = sum(wt.nonpara),
-                            treat.risk = covid_admit_death/cases) %>%
-                  ungroup() %>%
-                  select(treat.risk))
-
-# estimate total cases by non-parametric NUE
-boot_totalcases <- function(d, i) {
-  d2 <- d[i,]
-  return(floor(sum(d2$wt.nonpara, na.rm=TRUE)))
-}
-
-bootcases.nonpara <- boot(enclave.nonpara.wt , 
-                  boot_totalcases, R=2000)  
-tidy(bootcases.nonpara, conf.int = TRUE,  conf.level = .95) 
-
-
-
-## bootstrap 95%CI for strata-specific estimates, use in table 2
-
-### No outpatient therapy for COVID
-# create function to get percent covid_admit_death
-boot_freq.severe <- function(d, i) {
-  d2 <- d[i,]
-  return(sum(d2$covid_admit_death, na.rm=TRUE)/sum(if_else(d2$outpatient.coviddx == 1, d2$wt.nonpara, 0), na.rm=TRUE))
-}
-# limited data set for untreated, outpatient covid diagnosed patients (weights to full population)
-enclave.eligible.wt.boot <- enclave.nonpara.wt%>% 
-  filter(covid_treat == 0)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 3 or less" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-cat3.vax.lt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 3 or less", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 3 or less" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-cat3.vax.gt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 3 or less", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 3 or less" & mod.vax.status == "Not fully vaccinated"), 
-                 boot_freq.severe, R=2000)  
-cat3.unvax<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 3 or less", mod.vax.status = "Not fully vaccinated") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 4 and 5" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-cat5.vax.lt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 4 and 5", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 4 and 5" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-cat5.vax.gt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 4 and 5", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 4 and 5" & mod.vax.status == "Not fully vaccinated"), 
-                 boot_freq.severe, R=2000)  
-cat5.unvax<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 4 and 5", mod.vax.status = "Not fully vaccinated") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 6 or greater" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-cat6.vax.lt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 6 or greater", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 6 or greater" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-cat6.vax.gt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 6 or greater", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 6 or greater" & mod.vax.status == "Not fully vaccinated"), 
-                 boot_freq.severe, R=2000)  
-cat6.unvax<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 6 or greater", mod.vax.status = "Not fully vaccinated") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "Severe immunocompromise" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-ihc.vax.lt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "Severe immunocompromise", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "Severe immunocompromise" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-ihc.vax.gt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "Severe immunocompromise", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "Severe immunocompromise" & mod.vax.status == "Not fully vaccinated"), 
-                 boot_freq.severe, R=2000)  
-ihc.unvax<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "Severe immunocompromise", mod.vax.status = "Not fully vaccinated") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-
-enclave.nonpara.wt%>%
-  filter(covid_treat == 0) %>%
-  group_by(MASS.cat, mod.vax.status) %>%
-  summarise(severecovid = sum(covid_admit_death),
-            total = floor(sum(wt.nonpara))) %>%
-  mutate(risk = severecovid/total)
-
-
-severecovid.risk.est.untreat.all  <- rbind(cat3.unvax, cat3.vax.gt8mo, cat3.vax.lt8mo, 
-                                           cat5.unvax, cat5.vax.gt8mo, cat5.vax.lt8mo,  
-                                           cat6.unvax, cat6.vax.gt8mo, cat6.vax.lt8mo, 
-                                           ihc.unvax, ihc.vax.gt8mo, ihc.vax.lt8mo) %>%
-  mutate(statistic = signif(100*statistic, 2),
-         conf.low = signif(100*conf.low , 2),
-         conf.high = signif(100*conf.high , 2),
-         risk = paste0(statistic, "% (", conf.low, "% to ", conf.high, "%)"),
-         mod.vax.status = case_when(
-           mod.vax.status == "Not fully vaccinated" ~ "Not fully vaccinated (< 3 doses)",
-           TRUE ~ mod.vax.status
-         )) %>%
-  select(MASS.cat, mod.vax.status, risk) %>%
-  rename("MASS score" = MASS.cat, 
-         "Vaccination status" = mod.vax.status,
-         "No outpatient COVID treatment" = risk) 
-
-# TREATED
-# create function to get percent covid_admit_death
-boot_freq.severe <- function(d, i) {
-  d2 <- d[i,]
-  return(sum(d2$covid_admit_death, na.rm=TRUE)/sum(if_else(d2$outpatient.coviddx == 1, d2$wt.nonpara, 0), na.rm=TRUE))
-}
-# limited data set for untreated, outpatient covid diagnosed patients (weights to full population)
-enclave.eligible.wt.boot <- enclave.nonpara.wt%>% 
-  filter(covid_treat == 1)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 3 or less" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-cat3.vax.lt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 3 or less", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 3 or less" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-cat3.vax.gt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 3 or less", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 3 or less" & mod.vax.status == "Not fully vaccinated"), 
-                 boot_freq.severe, R=2000)  
-cat3.unvax.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 3 or less", mod.vax.status = "Not fully vaccinated") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 4 and 5" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-cat5.vax.lt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 4 and 5", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 4 and 5" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-cat5.vax.gt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 4 and 5", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 4 and 5" & mod.vax.status == "Not fully vaccinated"), 
-                 boot_freq.severe, R=2000)  
-cat5.unvax.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 4 and 5", mod.vax.status = "Not fully vaccinated") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 6 or greater" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-cat6.vax.lt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 6 or greater", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 6 or greater" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-cat6.vax.gt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 6 or greater", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "MASS 6 or greater" & mod.vax.status == "Not fully vaccinated"), 
-                 boot_freq.severe, R=2000)  
-cat6.unvax.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 6 or greater", mod.vax.status = "Not fully vaccinated") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "Severe immunocompromise" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-ihc.vax.lt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "Severe immunocompromise", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "Severe immunocompromise" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
-                 boot_freq.severe, R=2000)  
-ihc.vax.gt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "Severe immunocompromise", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-bootfreq <- boot(enclave.eligible.wt.boot %>%
-                   filter(MASS.cat == "Severe immunocompromise" & mod.vax.status == "Not fully vaccinated"), 
-                 boot_freq.severe, R=2000)  
-ihc.unvax.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
-  mutate(measure = "Covid Hosp or Death", MASS.cat = "Severe immunocompromise", mod.vax.status = "Not fully vaccinated") %>%
-  select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
-
-
-
-severecovid.risk.est.treat.all  <- rbind(cat3.unvax.tx, cat3.vax.gt8mo.tx, cat3.vax.lt8mo.tx, 
-                                         cat5.unvax.tx, cat5.vax.gt8mo.tx, cat5.vax.lt8mo.tx,  
-                                         cat6.unvax.tx, cat6.vax.gt8mo.tx, cat6.vax.lt8mo.tx, 
-                                         ihc.unvax.tx, ihc.vax.gt8mo.tx, ihc.vax.lt8mo.tx) %>%
-  mutate(statistic = signif(100*statistic, 2),
-         conf.low = signif(100*conf.low , 2),
-         conf.high = signif(100*conf.high , 2),
-         risk = paste0(statistic, "% (", conf.low, "% to ", conf.high, "%)"),
-         mod.vax.status = case_when(
-           mod.vax.status == "Not fully vaccinated" ~ "Not fully vaccinated (< 3 doses)",
-           TRUE ~ mod.vax.status
-         )) %>%
-  select(MASS.cat, mod.vax.status, risk) %>%
-  rename("MASS score" = MASS.cat, 
-         "Vaccination status" = mod.vax.status,
-         "Prescribed outpatient COVID treatment" = risk) 
-
-flextable(left_join(severecovid.risk.est.untreat.all, severecovid.risk.est.treat.all, by= c("MASS score", "Vaccination status")))
-
+# ### sensitivity analyses
+# 
+# ## non-parametric estimation of weights
+# nonpara.wts<- enclave.eligible %>%
+#   group_by(MASS.cat, age.cat, mod.vax.status, race.eth.collapsed, highADI, 
+#            covid_treat) %>%
+#   summarize(a = sum(if_else(outpatient.coviddx == 1 & covid_admit_death == 1, 1, 0)),
+#             b = sum(if_else(outpatient.coviddx == 1 & covid_admit_death == 0, 1, 0)),
+#             c = sum(if_else(outpatient.coviddx == 0 & covid_admit_death == 1, 1, 0))) %>%
+#   ungroup() %>%
+#   mutate(NUE1 = ((b + 1)*(c + 1)/(a + 1))-1,  
+#          NUE2 = a + b + c + ((b*c)/(a+1)), 
+#          MLE1 = if_else(a != 0, a + b + c + (b*c)/a, 0),
+#          MLE2 = if_else(a != 0, (a + b)*(a + c)/a, 0),
+#          NUEd = (b*c)/(a+1),
+#          MLEd = if_else(a != 0,(b*c)/(a), 0),
+#          wt.nonpara = 1/((a + 1) / (a + c + 2))) %>% #summarise(NUE1 = sum(NUE1), NUE2 = sum(NUE2), MLE1 = sum(MLE1), MLE2 = sum(MLE2), NUEd = sum(NUEd), MLEd = sum(MLEd)) %>%
+#   select(MASS.cat, age.cat, mod.vax.status, race.eth.collapsed, highADI, covid_treat, wt.nonpara)
+# 
+# enclave.nonpara.wt <- left_join(
+#   enclave.eligible, nonpara.wts, by = c("MASS.cat", "age.cat", "mod.vax.status", "race.eth.collapsed", "highADI", "covid_treat") ) %>% 
+#   mutate(outpt.wts = if_else(outpatient.coviddx == 1 & covid_admit_death == 0, wt.nonpara, 1)) %>% # use weights for outpatient dx (Chapman NUE) to estimate denominator, no weights for numerator as all observed
+#   mutate(mod.vax.status = case_when(
+#     mod.vax.status == "Vaccinated, last booster more than 8 months ago" ~ "Vaccinated, last booster or COVID ≥ 8 months prior",  #edit labels for accuracy
+#     mod.vax.status == "Vaccinated, last booster less than 8 months ago" ~ "Vaccinated, last booster or COVID < 8 months prior", 
+#     mod.vax.status == "Not fully vaccinated" ~ "Not fully vaccinated")) %>%
+#   mutate(mod.vax.status = fct_relevel(mod.vax.status, "Not fully vaccinated", "Vaccinated, last booster or COVID ≥ 8 months prior")) 
+# 
+# est <- cbind(enclave.nonpara.wt %>%
+#                 filter(covid_treat == 0) %>%
+#                 group_by(MASS.cat, mod.vax.status) %>%
+#                 summarize(covid_admit_death = round(sum(covid_admit_death),0),
+#                           cases = round(sum(wt.nonpara),0),
+#                           untreat.risk = covid_admit_death/cases) %>%
+#                     ungroup(), 
+#                 enclave.nonpara.wt %>%
+#                 filter(covid_treat == 1) %>%
+#                   group_by(MASS.cat, mod.vax.status) %>%
+#                   summarize(covid_admit_death = sum(covid_admit_death),
+#                             cases = sum(wt.nonpara),
+#                             treat.risk = covid_admit_death/cases) %>%
+#                   ungroup() %>%
+#                   select(treat.risk))
+# 
+# # estimate total cases by non-parametric NUE
+# boot_totalcases <- function(d, i) {
+#   d2 <- d[i,]
+#   return(floor(sum(d2$wt.nonpara, na.rm=TRUE)))
+# }
+# 
+# bootcases.nonpara <- boot(enclave.nonpara.wt , 
+#                   boot_totalcases, R=2000)  
+# tidy(bootcases.nonpara, conf.int = TRUE,  conf.level = .95) 
+# 
+# 
+# 
+# ## bootstrap 95%CI for strata-specific estimates, use in table 2
+# 
+# ### No outpatient therapy for COVID
+# # create function to get percent covid_admit_death
+# boot_freq.severe <- function(d, i) {
+#   d2 <- d[i,]
+#   return(sum(d2$covid_admit_death, na.rm=TRUE)/sum(if_else(d2$outpatient.coviddx == 1, d2$wt.nonpara, 0), na.rm=TRUE))
+# }
+# # limited data set for untreated, outpatient covid diagnosed patients (weights to full population)
+# enclave.eligible.wt.boot <- enclave.nonpara.wt%>% 
+#   filter(covid_treat == 0)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 3 or less" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# cat3.vax.lt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 3 or less", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 3 or less" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# cat3.vax.gt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 3 or less", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 3 or less" & mod.vax.status == "Not fully vaccinated"), 
+#                  boot_freq.severe, R=2000)  
+# cat3.unvax<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 3 or less", mod.vax.status = "Not fully vaccinated") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 4 and 5" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# cat5.vax.lt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 4 and 5", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 4 and 5" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# cat5.vax.gt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 4 and 5", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 4 and 5" & mod.vax.status == "Not fully vaccinated"), 
+#                  boot_freq.severe, R=2000)  
+# cat5.unvax<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 4 and 5", mod.vax.status = "Not fully vaccinated") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 6 or greater" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# cat6.vax.lt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 6 or greater", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 6 or greater" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# cat6.vax.gt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 6 or greater", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 6 or greater" & mod.vax.status == "Not fully vaccinated"), 
+#                  boot_freq.severe, R=2000)  
+# cat6.unvax<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 6 or greater", mod.vax.status = "Not fully vaccinated") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "Severe immunocompromise" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# ihc.vax.lt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "Severe immunocompromise", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "Severe immunocompromise" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# ihc.vax.gt8mo<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "Severe immunocompromise", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "Severe immunocompromise" & mod.vax.status == "Not fully vaccinated"), 
+#                  boot_freq.severe, R=2000)  
+# ihc.unvax<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "Severe immunocompromise", mod.vax.status = "Not fully vaccinated") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# 
+# enclave.nonpara.wt%>%
+#   filter(covid_treat == 0) %>%
+#   group_by(MASS.cat, mod.vax.status) %>%
+#   summarise(severecovid = sum(covid_admit_death),
+#             total = floor(sum(wt.nonpara))) %>%
+#   mutate(risk = severecovid/total)
+# 
+# 
+# severecovid.risk.est.untreat.all.nonpara  <- rbind(cat3.unvax, cat3.vax.gt8mo, cat3.vax.lt8mo, 
+#                                            cat5.unvax, cat5.vax.gt8mo, cat5.vax.lt8mo,  
+#                                            cat6.unvax, cat6.vax.gt8mo, cat6.vax.lt8mo, 
+#                                            ihc.unvax, ihc.vax.gt8mo, ihc.vax.lt8mo) %>%
+#   mutate(statistic = signif(100*statistic, 2),
+#          conf.low = signif(100*conf.low , 2),
+#          conf.high = signif(100*conf.high , 2),
+#          risk = paste0(statistic, "% (", conf.low, "% to ", conf.high, "%)"),
+#          mod.vax.status = case_when(
+#            mod.vax.status == "Not fully vaccinated" ~ "Not fully vaccinated (< 3 doses)",
+#            TRUE ~ mod.vax.status
+#          )) %>%
+#   select(MASS.cat, mod.vax.status, risk) %>%
+#   rename("MASS score" = MASS.cat, 
+#          "Vaccination status" = mod.vax.status,
+#          "No outpatient COVID treatment" = risk) 
+# 
+# # TREATED
+# # create function to get percent covid_admit_death
+# boot_freq.severe <- function(d, i) {
+#   d2 <- d[i,]
+#   return(sum(d2$covid_admit_death, na.rm=TRUE)/sum(if_else(d2$outpatient.coviddx == 1, d2$wt.nonpara, 0), na.rm=TRUE))
+# }
+# # limited data set for untreated, outpatient covid diagnosed patients (weights to full population)
+# enclave.eligible.wt.boot <- enclave.nonpara.wt%>% 
+#   filter(covid_treat == 1)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 3 or less" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# cat3.vax.lt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 3 or less", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 3 or less" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# cat3.vax.gt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 3 or less", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 3 or less" & mod.vax.status == "Not fully vaccinated"), 
+#                  boot_freq.severe, R=2000)  
+# cat3.unvax.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 3 or less", mod.vax.status = "Not fully vaccinated") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 4 and 5" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# cat5.vax.lt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 4 and 5", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 4 and 5" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# cat5.vax.gt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 4 and 5", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 4 and 5" & mod.vax.status == "Not fully vaccinated"), 
+#                  boot_freq.severe, R=2000)  
+# cat5.unvax.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 4 and 5", mod.vax.status = "Not fully vaccinated") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 6 or greater" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# cat6.vax.lt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 6 or greater", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 6 or greater" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# cat6.vax.gt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 6 or greater", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "MASS 6 or greater" & mod.vax.status == "Not fully vaccinated"), 
+#                  boot_freq.severe, R=2000)  
+# cat6.unvax.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "MASS 6 or greater", mod.vax.status = "Not fully vaccinated") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "Severe immunocompromise" & mod.vax.status == "Vaccinated, last booster or COVID < 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# ihc.vax.lt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "Severe immunocompromise", mod.vax.status = "Vaccinated, last booster or COVID < 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "Severe immunocompromise" & mod.vax.status == "Vaccinated, last booster or COVID ≥ 8 months prior"), 
+#                  boot_freq.severe, R=2000)  
+# ihc.vax.gt8mo.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "Severe immunocompromise", mod.vax.status = "Vaccinated, last booster or COVID ≥ 8 months prior") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# bootfreq <- boot(enclave.eligible.wt.boot %>%
+#                    filter(MASS.cat == "Severe immunocompromise" & mod.vax.status == "Not fully vaccinated"), 
+#                  boot_freq.severe, R=2000)  
+# ihc.unvax.tx<-tidy(bootfreq, conf.int = TRUE,  conf.level = .95) %>% 
+#   mutate(measure = "Covid Hosp or Death", MASS.cat = "Severe immunocompromise", mod.vax.status = "Not fully vaccinated") %>%
+#   select(measure, MASS.cat, mod.vax.status, statistic, conf.low, conf.high)
+# 
+# 
+# 
+# severecovid.risk.est.treat.all.nonpara  <- rbind(cat3.unvax.tx, cat3.vax.gt8mo.tx, cat3.vax.lt8mo.tx, 
+#                                          cat5.unvax.tx, cat5.vax.gt8mo.tx, cat5.vax.lt8mo.tx,  
+#                                          cat6.unvax.tx, cat6.vax.gt8mo.tx, cat6.vax.lt8mo.tx, 
+#                                          ihc.unvax.tx, ihc.vax.gt8mo.tx, ihc.vax.lt8mo.tx) %>%
+#   mutate(statistic = signif(100*statistic, 2),
+#          conf.low = signif(100*conf.low , 2),
+#          conf.high = signif(100*conf.high , 2),
+#          risk = paste0(statistic, "% (", conf.low, "% to ", conf.high, "%)"),
+#          mod.vax.status = case_when(
+#            mod.vax.status == "Not fully vaccinated" ~ "Not fully vaccinated (< 3 doses)",
+#            TRUE ~ mod.vax.status
+#          )) %>%
+#   select(MASS.cat, mod.vax.status, risk) %>%
+#   rename("MASS score" = MASS.cat, 
+#          "Vaccination status" = mod.vax.status,
+#          "Prescribed outpatient COVID treatment" = risk) 
+# 
+# 
