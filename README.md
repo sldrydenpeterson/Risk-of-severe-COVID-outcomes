@@ -1,2 +1,2 @@
-# Analytic scripts to estimate risk of severe COVID-19, using adapted capture-recapture methodology 
-Scripts written in R and untilize data from Mass General Brigham COVID Enclave
+# Risk of severe COVID Outcomes
+Scripts written to utilize programmatic data from the Mass General Brigham COVID Enclave (not included in repository) to provide estimates of risk of severe outcomes of COVID-19.
