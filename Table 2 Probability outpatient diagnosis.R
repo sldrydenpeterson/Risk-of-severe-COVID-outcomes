@@ -2,10 +2,19 @@ library(flextable)
 library(officer)
 
 
+load("inpatients.Rdata")
+
 # Set Table header/footer
-header <- str_squish(str_remove("Table 2. Odds ratios of preceding outpatient diagnosis of COVID-19* among patients with severe outcomes by selected characteristics— Mass General Brigham, June to December 2022", "\n"))
-footer <- paste0("* Recorded positive COVID-19 test result two or more calendar days prior to COVID hospitalization or death.\n", 
-                 "† Adjusted odds ratios from multivariable logistic model of apriori-selected characteristics are shown. In subsequent univariate analysis, all characteristics were significantly associated with preceding outpatient diagnosis (all p < 0.01), except neighborhood disadvantage (p = 0.8).")
+header <- as_paragraph("Table 2. Odds ratios of preceding outpatient diagnosis of COVID-19 among patients with severe outcomes",
+                        as_sup("a"), " by selected characteristics— Mass General Brigham, June to December 2022", "\n")
+# footer <- paste0("* Recorded positive COVID-19 test result two or more calendar days prior to COVID hospitalization or death.\n", 
+#                  "† Adjusted odds ratios from multivariable logistic model of apriori-selected characteristics are shown.")
+
+footer <- as_paragraph("Abbreviations: ADI, Area Deprivation Index; CI, confidence interval\n",
+                       as_sup("a"), " Recorded positive COVID-19 test result two or more calendar days prior to COVID hospitalization or death.\n",
+                       as_sup("b"), " Adjusted odds ratios from multivariable logistic model of apriori-selected characteristics are shown.\n")
+
+
 
 denom.fit.rename <- glm(
   outpatient.coviddx ~ as.factor(MASS.cat) + as.factor(age.cat) + as.factor(mod.vax.status)  
@@ -20,10 +29,11 @@ predict.outpatientdx <- gtsummary::tbl_regression(denom.fit.rename, exponentiate
                               `as.factor(highADI)` ~ "Neighborhood disadvantage (ADI)", `as.factor(covid_treat)` ~ "Outpatient COVID-19 treatment")) %>%
   gtsummary::add_global_p() %>% # type 3
   gtsummary::modify_footnote(everything() ~ NA, abbreviation = TRUE) %>% # remove footnotes
-  gtsummary::modify_header(estimate = "**Odds Ratio†**") %>%
+ # gtsummary::modify_header(estimate = "**Odds Ratio†**") %>%
   gtsummary::as_flex_table() %>%
   add_header_lines(header) %>%
   add_footer_lines(footer) %>%
+
   bold(i = 1, part = "header") %>% 
   hline_top(part = "header", 
             border = fp_border(color = "red", 
@@ -53,16 +63,23 @@ predict.outpatientdx <- gtsummary::tbl_regression(denom.fit.rename, exponentiate
   autofit(part = "body") %>% 
   bg(part = "body", bg = "#f5f5f5") %>% 
   align(part = "all", align = "center") %>% 
-  align(j = 1, part = "all", align = "left")
+  align(j = 1, part = "all", align = "left") %>%
+  mk_par(
+    part = "header", j = 2, i = 2,
+    value = as_paragraph(as_b("Odds Ratio"), as_sup("b"))) 
 
 
 
-# Save as word .docx
-save_as_docx(predict.outpatientdx, path = "Table 2 probability outpatient diagnosis.docx",
-             pr_section =
-               prop_section(page_size = page_size(orient = "portrait"), 
-                            type = "continuous"))
+# Save as .docx
+sect_properties <- prop_section(
+  page_size = page_size(orient = "portrait",
+                        width = 9.5, height = 13),  #allows to fit on one page with output
+  type = "continuous",
+  page_margins = page_mar()
+)
 
+save_as_docx(predict.outpatientdx,
+             path =  "Table 2 probability outpatient diagnosis.docx", 
+             pr_section = sect_properties)
 
-
-
+rm(list = ls())

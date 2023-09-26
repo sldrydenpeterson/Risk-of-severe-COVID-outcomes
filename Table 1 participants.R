@@ -9,6 +9,8 @@ library(officer)
 
 fixzip <- function(x){ifelse(nchar(x)<5, paste0(0,x), x)}
 
+load("enclave.eligible.wt.Rdata")
+
 enclave.eligible.tab1 <-data.frame( enclave.eligible.wt %>%
                                       mutate(
                                         outpatient.coviddx = fct_relevel(as.factor(outpatient.coviddx), "0"),
@@ -364,13 +366,32 @@ custom_tab <- function(df, header, footer){
 
 # Set Table header
 
-header <- str_squish("Table 1. Characteristics of increased risk individuals with COVID-19— recorded and projected cases\nMass General Brigham, June to December 2022")
-footer <- paste0("* Projected cases with each characteristic estimated from the pseudocohort generated with strata-specific weights of the inverse probability of a preceding COVID-19 diagnosis prior to onset of severe outcome.")
+header <- str_squish("Table 1. Characteristics of increased risk individuals with COVID-19— recorded and estimated total cases\nMass General Brigham, June to December 2022")
+footer <- paste0("* Projected cases with each characteristic estimated from the pseudocohort generated with strata-specific weights of the inverse probability of a preceding COVID-19 diagnosis before the onset of severe outcome.")
+
+footer <- as_paragraph("Abbreviations: ADI, Area Deprivation Index\n",
+                       as_sup("a"), " Total cases estimated through adapted capture-recapture methodology utilizing the strata-specific, inverse probability of a preceding recorded COVID-19 diagnosis prior to the onset of severe outcome as weights.\n")
+
 # Set custom_tab() defaults
 tab1_defaults()
 
 # Create the flextable object
-flextable_1 <- custom_tab(tab1, header, footer)
+flextable_1 <- custom_tab(tab1, header, footer) %>%
+  mk_par(
+    part = "header", j = 1, i = 2,
+    value = as_paragraph(as_b("Characteristic"))) %>%
+  mk_par(
+    part = "header", j = 2, i = 2,
+    value = as_paragraph(as_b("Recorded cases"))) %>%
+  mk_par(
+    part = "header", j = 3, i = 2,
+    value = as_paragraph(as_b("Estimated total cases"), as_sup("a"))) %>%
+  mk_par(
+    part = "header", j = 4, i = 2,
+    value = as_paragraph(as_b("Ratio of estimated total to recorded cases"))) %>%
+  mk_par(
+    part = "header", j = 5, i = 2,
+    value = as_paragraph(as_b("Severe outcomes of COVID-19")))
 
 
 # Save as word .docx
@@ -380,3 +401,4 @@ save_as_docx(flextable_1, path = "Table 1 participants.docx",
                             type = "continuous"))
 
 
+rm(list = ls())
