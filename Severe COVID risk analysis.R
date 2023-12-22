@@ -1,9 +1,8 @@
 rm(list = ls())
 source("Severe COVID dataset formatting.R")
 source("Severe COVID risk estimates.R")
-source("NNT to prevent severe COVID.R")
-source("Fig 1 cohort diagram.R")
 source("Table 1 participants.R")
-source("Table 2 Probability outpatient diagnosis.R")
-source("Table 3 Severe COVID risk strata.R")
-
+source("Table 2 Severe COVID risk strata.R")
+source("Tables 3 to 5 NIH, age and WHO tables.R")
+source("Supplemental Fig 1 cohort diagram.R")
+source("Supplemental Table 1 Probability outpatient diagnosis.R")
