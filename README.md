@@ -1,2 +1,2 @@
 # Risk of Severe COVID Outcomes
-Scripts written to utilize programmatic data from the Mass General Brigham COVID Enclave (not included in repository) to provide estimates of risk of severe outcomes of COVID-19 (hospitalization within 14 days or death within 28 days from COVID diagnosis).
+Scripts written to utilize programmatic data from the Mass General Brigham COVID Enclave (not included in repository) to provide estimates of risk of severe outcomes of COVID-19 (hospitalization within 14 days or death within 28 days from COVID diagnosis). Analyses published in Dryden-Peterson et al. 2025, PLoS One, Severe outcomes of COVID-19 among adults with increased risk conditions: A population-based observational study, https://doi.org/10.1371/journal.pone.0316529.
